@@ -4,6 +4,7 @@ package clienta;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -15,6 +16,7 @@ import java.io.PrintWriter;
 import java.net.Socket;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
+import java.nio.file.OpenOption;
 import java.security.InvalidKeyException;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
@@ -23,7 +25,14 @@ import java.security.NoSuchProviderException;
 import java.security.SignatureException;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
+import java.util.Scanner;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import javax.swing.JFileChooser;
+import javax.swing.JOptionPane;
+import org.bouncycastle.openpgp.PGPException;
+import org.bouncycastle.openpgp.PGPPrivateKey;
+import org.bouncycastle.openpgp.PGPPublicKey;
 
 /**
  * 
@@ -283,13 +292,43 @@ public class ClientA extends javax.swing.JFrame {
     }//GEN-LAST:event_attachFileActionPerformed
 
     private void btnDecryptActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnDecryptActionPerformed
-        // TODO add your handling code here:
+        
+        FileInputStream in = null;
+        try {
+            in = new FileInputStream("ecryptedreceieved.txt");
+            PGPDecryption.decryptFile(this,in,PGPkeys.getSenderPub(),PGPkeys.getSenderPriv());
+        } catch (FileNotFoundException ex) {
+            Logger.getLogger(ClientA.class.getName()).log(Level.SEVERE, null, ex);
+        } catch (IOException | PGPException ex) {
+            Logger.getLogger(ClientA.class.getName()).log(Level.SEVERE, null, ex);
+        } finally {
+            try {
+                in.close();
+            } catch (IOException ex) {
+                Logger.getLogger(ClientA.class.getName()).log(Level.SEVERE, null, ex);
+            }
+        }
+        File encrec = new File("ecryptedreceieved.txt");
+        encrec.delete();
+        File myFile = new File("DecryptedFile.txt");
+        try (Scanner myReader = new Scanner(myFile)) {
+        while (myReader.hasNextLine()) {
+                String data = myReader.nextLine();
+                jtaDecRec.append("\n");
+                jtaDecRec.append(data);
+            }
+            myReader.close();
+        } catch (FileNotFoundException ex) {
+            Logger.getLogger(ClientA.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        jtaRecEnc.setText("");
     }//GEN-LAST:event_btnDecryptActionPerformed
 
     private void btnConnectBActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnConnectBActionPerformed
         try{
             //we passed ip address of client B and port number
             socket = new Socket(Settings.ip_Address,Settings.port);
+            JOptionPane.showMessageDialog(this, "connected to client b..check certification text box below");
             jtaCertificate.append("connected to client B \n");
             
             //input and output readers;
@@ -336,7 +375,12 @@ public class ClientA extends javax.swing.JFrame {
     private void btnSendActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_btnSendActionPerformed
         try{
             if(fileToBeEnc!=null){
-                
+                FileOutputStream fos = new FileOutputStream("EncryptedMessage.txt");
+                PGPEncryption.EncrypFile(fileToBeEnc,fos,PGPkeys.getReceiverPub(),PGPkeys.getSenderPub(),PGPkeys.getSenderPriv(),asciiArmored,integrityCheck);
+                File myFile = new File ("EncryptedMessage.txt");
+                byte[] content = Files.readAllBytes(myFile.toPath());
+                out.writeObject(content);
+                myFile.delete();
             }
             else{
                 FileWriter write = new FileWriter("input.txt");
@@ -345,7 +389,7 @@ public class ClientA extends javax.swing.JFrame {
                 print_line.close();
                 //InputStream inputStream = new ByteArrayInputStream(jtaSend.getText().getBytes(Charset.forName("UTF-8")));
                 FileOutputStream fos = new FileOutputStream("EncryptedMessage.txt");
-                PGPEncryption.EncrypText("input.txt",fos,PGPkeys.getReceiverPub(),PGPkeys.getSenderPub(),PGPkeys.getSenderPriv(),asciiArmored,integrityCheck);
+                PGPEncryption.EncrypFile("input.txt",fos,PGPkeys.getReceiverPub(),PGPkeys.getSenderPub(),PGPkeys.getSenderPriv(),asciiArmored,integrityCheck);
                 File file = new File("input.txt");
                 file.delete();
                 File myFile = new File ("EncryptedMessage.txt");
@@ -355,6 +399,7 @@ public class ClientA extends javax.swing.JFrame {
             }
             //out.writeObject(jtaSend.getText());
             jtaSend.setText("");
+            filePath.setText("");
         }catch(Exception e){
             e.printStackTrace();
         }
@@ -454,6 +499,39 @@ public class ClientA extends javax.swing.JFrame {
             e.printStackTrace();
         } 
     }
+
+    public void signaturePast(boolean verified) {
+        if(verified){
+            JOptionPane.showMessageDialog(this, "Signature verified");      
+        }
+        else{
+            JOptionPane.showMessageDialog(this, "Signature verification failed");
+        }
+        
+    }
+
+    public void justSignedOrTypeUnknown(boolean signedOrUnknown) {
+        if(signedOrUnknown){
+           JOptionPane.showMessageDialog(this, "encrypted message contains a signed message - not literal data."); 
+        }
+        else{
+            JOptionPane.showMessageDialog(this, "message is not a simple encrypted file - type unknown.");
+        }
+        
+    }
+
+    public void integrityCheck(boolean verified) {
+        if(verified){
+            JOptionPane.showMessageDialog(this, "message integrity check passed");
+        }
+        else{
+            JOptionPane.showMessageDialog(this, "no message integrity check");
+        }
+        
+    }
+    public void integrityCheck() {
+      JOptionPane.showMessageDialog(this, "no message integrity check");  
+    }
     
     //class within
     //extend thread so as to make it thread
@@ -474,7 +552,18 @@ public class ClientA extends javax.swing.JFrame {
             while(true){
                 try{
                     //append(encrypted message)
-                    jtaRecEnc.append(oin.readObject().toString() + "\n");
+                    File myFile = new File("ecryptedreceieved.txt");
+                    byte[] content = (byte[])this.oin.readObject();
+                    Files.write(myFile.toPath(), content);
+                    try (final Scanner myReader = new Scanner(myFile)) {
+                        while (myReader.hasNextLine()) {
+                            String data = myReader.nextLine();
+                            jtaRecEnc.append("\n");
+                            jtaRecEnc.append(data);
+                        }
+                        myReader.close();
+                    }
+                    //jtaRecEnc.append(oin.readObject().toString() + "\n");
                     
                     //recieval of decrypted text
                     //System.out.println("from client B: "+ oin.readObject().toString());
